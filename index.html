@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Asset Tracker | 구글 시트 실시간 연동</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+    body { font-family: 'Pretendard', sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen pb-12">
+
+  <!-- Header -->
+  <header class="border-b border-slate-800 bg-slate-900/80 sticky top-0 z-30 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="p-2 bg-indigo-600 rounded-lg text-white">
+          <i data-lucide="pie-chart" class="w-6 h-6"></i>
+        </div>
+        <h1 class="text-xl font-bold tracking-tight text-white">Asset Tracker</h1>
+      </div>
+      <div class="flex items-center space-x-3">
+        <button onclick="fetchData()" id="refreshBtn" class="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition" title="새로고침">
+          <i data-lucide="refresh-cw" class="w-5 h-5"></i>
+        </button>
+        <button onclick="openModal()" class="flex items-center space-x-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2 rounded-lg transition shadow-lg shadow-indigo-600/20">
+          <i data-lucide="plus" class="w-4 h-4"></i>
+          <span>자산 추가</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-8">
+
+    <!-- Loading Indicator -->
+    <div id="loadingOverlay" class="flex flex-col items-center justify-center py-12 space-y-3">
+      <div class="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+      <p class="text-sm text-slate-400">구글 시트에서 데이터를 불러오는 중...</p>
+    </div>
+
+    <!-- Main Dashboard Body (Hidden during initial load) -->
+    <div id="dashboardContent" class="space-y-8 hidden">
+      <!-- Metric Cards -->
+      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-5 shadow-sm">
+          <div class="flex items-center justify-between text-slate-400 mb-2">
+            <span class="text-sm font-medium">총 평가 자산</span>
+            <i data-lucide="wallet" class="w-5 h-5 text-indigo-400"></i>
+          </div>
+          <div class="text-2xl font-bold text-white tracking-tight" id="totalCurrentVal">₩0</div>
+        </div>
+
+        <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-5 shadow-sm">
+          <div class="flex items-center justify-between text-slate-400 mb-2">
+            <span class="text-sm font-medium">총 투자 원금</span>
+            <i data-lucide="piggy-bank" class="w-5 h-5 text-blue-400"></i>
+          </div>
+          <div class="text-2xl font-bold text-white tracking-tight" id="totalInvestedVal">₩0</div>
+        </div>
+
+        <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-5 shadow-sm">
+          <div class="flex items-center justify-between text-slate-400 mb-2">
+            <span class="text-sm font-medium">총 평가 손익</span>
+            <i data-lucide="trending-up" class="w-5 h-5 text-emerald-400"></i>
+          </div>
+          <div class="text-2xl font-bold tracking-tight" id="totalReturnVal">₩0</div>
+        </div>
+
+        <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-5 shadow-sm">
+          <div class="flex items-center justify-between text-slate-400 mb-2">
+            <span class="text-sm font-medium">전체 수익률 (ROI)</span>
+            <i data-lucide="percent" class="w-5 h-5 text-amber-400"></i>
+          </div>
+          <div class="text-2xl font-bold tracking-tight" id="totalRoiVal">0.00%</div>
+        </div>
+      </section>
+
+      <!-- Charts & Breakdown -->
+      <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-6 lg:col-span-1 flex flex-col justify-between">
+          <h2 class="text-base font-semibold text-white mb-4">자산군별 비중</h2>
+          <div class="relative w-full aspect-square max-w-[260px] mx-auto">
+            <canvas id="portfolioChart"></canvas>
+          </div>
+          <div id="chartLegend" class="mt-4 grid grid-cols-2 gap-2 text-xs"></div>
+        </div>
+
+        <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-6 lg:col-span-2">
+          <h2 class="text-base font-semibold text-white mb-4">자산군별 요약</h2>
+          <div id="categorySummaryList" class="space-y-3"></div>
+        </div>
+      </section>
+
+      <!-- Asset List Table -->
+      <section class="bg-slate-800/80 border border-slate-700/60 rounded-xl overflow-hidden shadow-sm">
+        <div class="p-5 border-b border-slate-700/60 flex justify-between items-center">
+          <h2 class="text-base font-semibold text-white">보유 자산 리스트</h2>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-sm text-slate-300">
+            <thead class="bg-slate-900/40 text-xs uppercase text-slate-400 border-b border-slate-700/60">
+              <tr>
+                <th class="py-3.5 px-4">자산군</th>
+                <th class="py-3.5 px-4">자산명</th>
+                <th class="py-3.5 px-4 text-right">투자 원금</th>
+                <th class="py-3.5 px-4 text-right">현재 평가금</th>
+                <th class="py-3.5 px-4 text-right">평가 손익</th>
+                <th class="py-3.5 px-4 text-right">수익률</th>
+                <th class="py-3.5 px-4 text-center">관리</th>
+              </tr>
+            </thead>
+            <tbody id="assetTableBody" class="divide-y divide-slate-700/40"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Modal -->
+  <div id="assetModal" class="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-slate-800 border border-slate-700 rounded-xl w-full max-w-md p-6 shadow-2xl">
+      <div class="flex items-center justify-between mb-5">
+        <h3 class="text-lg font-bold text-white" id="modalTitle">자산 추가</h3>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+
+      <form id="assetForm" onsubmit="handleFormSubmit(event)" class="space-y-4">
+        <input type="hidden" id="assetId" />
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">자산군</label>
+          <select id="assetClass" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none">
+            <option value="주식/ETF">주식/ETF</option>
+            <option value="부동산">부동산</option>
+            <option value="암호화폐">암호화폐</option>
+            <option value="현금/채권">현금/채권</option>
+            <option value="기타">기타</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">자산명</label>
+          <input type="text" id="assetName" required placeholder="예: 삼성전자" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">투자 원금 (₩)</label>
+            <input type="number" id="investedAmount" required min="0" placeholder="0" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">현재 평가금 (₩)</label>
+            <input type="number" id="currentValue" required min="0" placeholder="0" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">메모</label>
+          <input type="text" id="assetMemo" placeholder="선택사항" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none" />
+        </div>
+        <div class="pt-3 flex space-x-3">
+          <button type="button" onclick="closeModal()" class="w-1/2 bg-slate-700 hover:bg-slate-600 text-slate-200 py-2 rounded-lg text-sm">취소</button>
+          <button type="submit" id="saveBtn" class="w-1/2 bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-lg text-sm">저장하기</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // 🔴 여기에 배포한 Google Apps Script 웹 앱 URL을 넣으세요.
+    const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxmKCWBlueQpD5VM3RuBeyw8ETIuvLvqZXNMtmPdP_zLyhGdyKY1hyhn_-ga7s9FJPeTw/exec";
+
+    let portfolioData = [];
+    let myChart = null;
+
+    const categoryColors = {
+      '주식/ETF': '#3b82f6', '부동산': '#10b981', '암호화폐': '#f59e0b',
+      '현금/채권': '#8b5cf6', '기타': '#64748b'
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      fetchData();
+    });
+
+    // --- Google Sheets API 연동: READ ---
+    async function fetchData() {
+      if (!GAS_API_URL || GAS_API_URL.includes("YOUR_GOOGLE_APPS_SCRIPT")) {
+        alert("index.html 파일 내 GAS_API_URL에 배포한 구글 스크립트 URL을 입력해주세요.");
+        return;
+      }
+
+      document.getElementById('loadingOverlay').classList.remove('hidden');
+      document.getElementById('dashboardContent').classList.add('hidden');
+
+      try {
+        // Apps Script의 HTTP 302 Redirect 수신 처리
+        const res = await fetch(GAS_API_URL, { redirect: 'follow' });
+        const data = await res.json();
+        
+        portfolioData = Array.isArray(data) ? data : [];
+        renderDashboard();
+      } catch (err) {
+        console.error("구글 시트 연동 오류:", err);
+        alert("구글 시트 데이터를 불러오는 데 실패했습니다. 배포 권한(모든 사용자) 및 URL을 확인하세요.");
+      } finally {
+        document.getElementById('loadingOverlay').classList.add('hidden');
+        document.getElementById('dashboardContent').classList.remove('hidden');
+      }
+    }
+
+    // --- Google Sheets API 연동: WRITE (Create/Update/Delete) ---
+    async function sendToGoogleSheet(payload) {
+      // POST 요청 시 text/plain 브라우저 preflight 및 CORS 우회 처리
+      await fetch(GAS_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+        redirect: 'follow'
+      });
+      // 저장 후 최신 시트 데이터로 동기화
+      await fetchData();
+    }
+
+    function renderDashboard() {
+      calculateMetrics();
+      renderChart();
+      renderSummaryList();
+      renderTable();
+      lucide.createIcons();
+    }
+
+    function calculateMetrics() {
+      const totalInvested = portfolioData.reduce((acc, cur) => acc + Number(cur.invested_amount || 0), 0);
+      const totalCurrent = portfolioData.reduce((acc, cur) => acc + Number(cur.current_value || 0), 0);
+      const totalReturn = totalCurrent - totalInvested;
+      const totalRoi = totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
+
+      document.getElementById('totalCurrentVal').innerText = formatKRW(totalCurrent);
+      document.getElementById('totalInvestedVal').innerText = formatKRW(totalInvested);
+      
+      const returnEl = document.getElementById('totalReturnVal');
+      const roiEl = document.getElementById('totalRoiVal');
+      
+      returnEl.innerText = (totalReturn >= 0 ? '+' : '') + formatKRW(totalReturn);
+      roiEl.innerText = (totalRoi >= 0 ? '+' : '') + totalRoi.toFixed(2) + '%';
+
+      returnEl.className = `text-2xl font-bold tracking-tight ${totalReturn >= 0 ? 'text-rose-500' : 'text-blue-500'}`;
+      roiEl.className = `text-2xl font-bold tracking-tight ${totalRoi >= 0 ? 'text-rose-500' : 'text-blue-500'}`;
+    }
+
+    function renderChart() {
+      const categoryMap = {};
+      portfolioData.forEach(item => {
+        const cat = item.asset_class || '기타';
+        categoryMap[cat] = (categoryMap[cat] || 0) + Number(item.current_value || 0);
+      });
+
+      const labels = Object.keys(categoryMap);
+      const dataValues = Object.values(categoryMap);
+      const bgColors = labels.map(l => categoryColors[l] || '#64748b');
+
+      const ctx = document.getElementById('portfolioChart').getContext('2d');
+      if (myChart) myChart.destroy();
+
+      myChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels,
+          datasets: [{ data: dataValues, backgroundColor: bgColors, borderWidth: 0 }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, cutout: '70%' }
+      });
+
+      const total = dataValues.reduce((a, b) => a + b, 0);
+      document.getElementById('chartLegend').innerHTML = labels.map((l, idx) => {
+        const pct = total > 0 ? ((dataValues[idx] / total) * 100).toFixed(1) : 0;
+        return `
+          <div class="flex items-center space-x-1.5">
+            <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${bgColors[idx]}"></span>
+            <span class="text-slate-300 truncate">${l} (${pct}%)</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderSummaryList() {
+      const categoryMap = {};
+      let grandTotal = 0;
+
+      portfolioData.forEach(item => {
+        const cat = item.asset_class || '기타';
+        const val = Number(item.current_value || 0);
+        const inv = Number(item.invested_amount || 0);
+        
+        if (!categoryMap[cat]) categoryMap[cat] = { current: 0, invested: 0 };
+        categoryMap[cat].current += val;
+        categoryMap[cat].invested += inv;
+        grandTotal += val;
+      });
+
+      document.getElementById('categorySummaryList').innerHTML = Object.keys(categoryMap).map(cat => {
+        const cur = categoryMap[cat].current;
+        const inv = categoryMap[cat].invested;
+        const diff = cur - inv;
+        const roi = inv > 0 ? (diff / inv) * 100 : 0;
+        const ratio = grandTotal > 0 ? ((cur / grandTotal) * 100).toFixed(1) : 0;
+        const color = categoryColors[cat] || '#64748b';
+
+        return `
+          <div class="p-3 bg-slate-900/50 rounded-lg border border-slate-700/40 space-y-2">
+            <div class="flex justify-between text-xs font-medium">
+              <span class="flex items-center space-x-2">
+                <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${color}"></span>
+                <span class="text-white">${cat}</span>
+              </span>
+              <span class="text-slate-400">${formatKRW(cur)} (${ratio}%)</span>
+            </div>
+            <div class="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+              <div class="h-1.5 rounded-full" style="width: ${ratio}%; background-color: ${color}"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('assetTableBody');
+      if (portfolioData.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-500">시트에 등록된 자산이 없습니다. 상단에서 추가해보세요.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = portfolioData.map(item => {
+        const inv = Number(item.invested_amount || 0);
+        const cur = Number(item.current_value || 0);
+        const diff = cur - inv;
+        const roi = inv > 0 ? (diff / inv) * 100 : 0;
+        const color = categoryColors[item.asset_class] || '#64748b';
+
+        return `
+          <tr class="hover:bg-slate-800/40 transition">
+            <td class="py-3 px-4">
+              <span class="inline-flex px-2 py-0.5 rounded text-xs font-medium text-white" style="background-color: ${color}33; color: ${color}; border: 1px solid ${color}55">
+                ${item.asset_class}
+              </span>
+            </td>
+            <td class="py-3 px-4 font-medium text-white">
+              ${item.asset_name}
+              ${item.memo ? `<span class="block text-xs text-slate-500 font-normal">${item.memo}</span>` : ''}
+            </td>
+            <td class="py-3 px-4 text-right">${formatKRW(inv)}</td>
+            <td class="py-3 px-4 text-right font-medium text-white">${formatKRW(cur)}</td>
+            <td class="py-3 px-4 text-right font-medium ${diff >= 0 ? 'text-rose-400' : 'text-blue-400'}">${diff >= 0 ? '+' : ''}${formatKRW(diff)}</td>
+            <td class="py-3 px-4 text-right font-medium ${roi >= 0 ? 'text-rose-400' : 'text-blue-400'}">${roi >= 0 ? '+' : ''}${roi.toFixed(2)}%</td>
+            <td class="py-3 px-4 text-center space-x-2">
+              <button onclick="editAsset('${item.id}')" class="text-slate-400 hover:text-indigo-400"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
+              <button onclick="deleteAsset('${item.id}')" class="text-slate-400 hover:text-rose-400"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function handleFormSubmit(e) {
+      e.preventDefault();
+      const saveBtn = document.getElementById('saveBtn');
+      saveBtn.disabled = true;
+      saveBtn.innerText = "저장 중...";
+
+      const id = document.getElementById('assetId').value || 'id_' + Date.now();
+      const payload = {
+        action: 'SAVE',
+        data: {
+          id,
+          asset_class: document.getElementById('assetClass').value,
+          asset_name: document.getElementById('assetName').value,
+          invested_amount: document.getElementById('investedAmount').value,
+          current_value: document.getElementById('currentValue').value,
+          memo: document.getElementById('assetMemo').value
+        }
+      };
+
+      closeModal();
+      await sendToGoogleSheet(payload);
+      saveBtn.disabled = false;
+      saveBtn.innerText = "저장하기";
+    }
+
+    function editAsset(id) {
+      const item = portfolioData.find(i => String(i.id) === String(id));
+      if (!item) return;
+
+      document.getElementById('assetId').value = item.id;
+      document.getElementById('assetClass').value = item.asset_class;
+      document.getElementById('assetName').value = item.asset_name;
+      document.getElementById('investedAmount').value = item.invested_amount;
+      document.getElementById('currentValue').value = item.current_value;
+      document.getElementById('assetMemo').value = item.memo || '';
+
+      openModal(true);
+    }
+
+    async function deleteAsset(id) {
+      if (!confirm("구글 시트에서 해당 자산을 삭제하시겠습니까?")) return;
+      
+      document.getElementById('loadingOverlay').classList.remove('hidden');
+      document.getElementById('dashboardContent').classList.add('hidden');
+
+      await sendToGoogleSheet({ action: 'DELETE', id });
+    }
+
+    function openModal(isEdit = false) {
+      document.getElementById('modalTitle').innerText = isEdit ? "자산 수정" : "자산 추가";
+      document.getElementById('assetModal').classList.remove('hidden');
+    }
+
+    function closeModal() {
+      document.getElementById('assetModal').classList.add('hidden');
+      document.getElementById('assetForm').reset();
+      document.getElementById('assetId').value = '';
+    }
+
+    function formatKRW(num) {
+      return '₩' + Math.round(num).toLocaleString('ko-KR');
+    }
+  </script>
+</body>
+</html>
