@@ -137,7 +137,7 @@
 
   <script>
     // 🔴 배포한 Apps Script 웹 앱 URL (…/exec)
-    const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx1dwEF9LfE7mQv2mxWzQOPuo-38zpYUJVbfbjSVDUSpVbmkqmNQGIjnIbUvPR3yr2RnA/exec";
+    const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyYOmlLPg4FR4jmVIIsFrQ-CCuV9UPWJatc1i0Cf403yTLRDPCRGAcaMjGRQ_S__BPAZQ/exec";
 
     // ===== 목표 포트폴리오 =====
     const TARGETS = [
@@ -210,7 +210,8 @@
       try {
         const res = await fetch(GAS_API_URL + '?token=' + encodeURIComponent(TOKEN), { redirect: 'follow' });
         const d = await res.json();
-        if (d.error) return logout(true);
+        if (d.error === 'unauthorized') return logout(true);
+        if (d.error) { alert('서버 오류: ' + d.error); return; }
         raw = d.assets || []; quotes = d.quotes || {}; fx = Number(d.fx) || fx;
         renderDashboard(); show('dashboardContent', true);
       } catch (err) {
@@ -219,7 +220,8 @@
     }
     async function post(payload) {
       const res = await fetch(GAS_API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...payload, token: TOKEN }), redirect: 'follow' });
-      const d = await res.json(); if (d.error) { logout(true); throw new Error('unauthorized'); }
+      const d = await res.json(); if (d.error === 'unauthorized') { logout(true); throw new Error('unauthorized'); }
+      if (d.error) { alert('서버 오류: ' + d.error); throw new Error(d.error); }
     }
 
     // ===== 자산 계산: 평가금 = 현재가 × 수량, 원금 = 매입단가 × 수량 =====
